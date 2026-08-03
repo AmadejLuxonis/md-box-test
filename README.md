@@ -1,18 +1,8 @@
-# Minimal M8 Controller Box Container Example
+# M8 Controller Box Test Example
 
-This is a minimal example showing how to run an OAK app that controls the **M8 Controller Box** directly from an **OAK4** device.
+This is an example showing how to run an OAK app that controls the **M8 Controller Box** directly from an **OAK4** device.
 
 > **Note:** This example works only on OAK4 in standalone mode. It is not supported in host-driven peripheral mode because the M8 Controller Box is connected directly to the OAK4 device.
-
-## Functionality
-
-This example performs simple GPIO interactions:
-
-- The LED connected to **pin 18** blinks continuously.
-- When the button connected to **pin 19** is pressed:
-  - The LED connected to **pin 17** turns on.
-
-This provides a minimal reference setup for applications running directly on the OAK4 device with the M8 Controller Box attached.
 
 ## Usage
 
