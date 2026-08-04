@@ -5,6 +5,7 @@ assign_frontend_port = true
 
 prepare_container = [
     { type = "COPY", source = "./requirements.txt", target = "./requirements.txt" },
+    { type = "COPY", source = "./rp2040_u2if", target = "./rp2040_u2if" },
     { type = "RUN", command = "python3.12 -m pip install -r /app/requirements.txt --break-system-packages" },
     { type = "RUN", command = "bash -lc 'set -e; apt-get update && apt-get install -y libhidapi-hidraw0 libhidapi-libusb0 alsa-utils'" }
 ]
