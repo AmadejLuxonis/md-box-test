@@ -98,6 +98,13 @@ for gpio in OUT_GPIOS:
 for gpio in IN_GPIOS:
     box.gpio_init(gpio, box.GPIO_IN, box.GPIO_PULL_DOWN)
 
+box.relay_reset(1)
+box.relay_reset(2)
+box.relay_reset(3)
+box.relay_reset(4)
+
+box.fsync_controller_init()
+
 while True:
     now = time.monotonic()
 
@@ -125,8 +132,22 @@ while True:
 
         if relay_state == True:
             box.relay_set(1) 
+            time.sleep(0.1)
+            box.relay_set(2)
+            time.sleep(0.1)
+            box.relay_set(3)
+            time.sleep(0.1)
+            box.relay_set(4)
+            time.sleep(0.1)
         else:
             box.relay_reset(1)
+            time.sleep(0.1)
+            box.relay_reset(2)
+            time.sleep(0.1)
+            box.relay_reset(3)
+            time.sleep(0.1)
+            box.relay_reset(4)
+            time.sleep(0.1)
 
         last_switch = now
 

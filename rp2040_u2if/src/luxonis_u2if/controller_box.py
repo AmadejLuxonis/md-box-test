@@ -65,7 +65,7 @@ class ControllerBox:
     # FSYNC CONTROLLER
     # ----------------------------------------------------------------
 
-    FSYNC_I2C_BUS = 0
+    FSYNC_I2C_BUS = 1
     FSYNC_I2C_CLK_SPEED = 400000
     FSYNC_CONTROLLER_ADDR = 0x12
     FSYNC_CONTROLLER_DATA_ENDIAN = "<"
@@ -398,7 +398,8 @@ class ControllerBox:
 
         if self.FSYNC_CONTROLLER_ADDR not in slaves:
             raise RuntimeError("FSYNC Controller not found")
-
+        
+        
         self._fsync_stm_write(
             self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
         )
@@ -406,10 +407,18 @@ class ControllerBox:
         mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
 
         if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
-
             self._fsync_stm_write(
                 self.FSYNC_STM_FW_VERSION_REG + self.FSYNC_STM_UNLOCK_MAGIC
             )
+
+            for pid in range(0, self.FSYNC_STM_PIN_CONFIG_REG_END - self.FSYNC_STM_PIN_CONFIG_REG_START):
+                reg = self.CONFIG_REG_MAP[pid]
+                conf = self.FSYNC_DEFAULT_CONFIG[pid]
+                self._fsync_stm_write(reg + conf)
+
+            if self._fsync_stm_read(self.FSYNC_STM_PIN_CONFIG_VAILD_REG) != 0:
+                raise RuntimeError("Invalid hardware configuration passed to FSYNC Controller")
+
             self._fsync_stm_write(
                 self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
             )
@@ -534,3 +543,105 @@ ControllerBox.FSYNC_STM_OUTPUT_11_DUTY_CYCLE = ControllerBox._fsync_stm_bin(0x1E
 ControllerBox.FSYNC_STM_OUTPUT_11_ACTIVE_LVL = ControllerBox._fsync_stm_bin(0x1F, 1)
 ControllerBox.FSYNC_STM_OUTPUT_ACTIVE_LVL_LOW = ControllerBox._fsync_stm_bin(0x00, 4)
 ControllerBox.FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH = ControllerBox._fsync_stm_bin(0x01, 4)
+
+ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START = 34
+ControllerBox.FSYNC_STM_PIN_PA0_ID = 0
+ControllerBox.FSYNC_STM_PIN_PA1_ID = 1
+ControllerBox.FSYNC_STM_PIN_PA2_ID = 2
+ControllerBox.FSYNC_STM_PIN_PA3_ID = 3
+ControllerBox.FSYNC_STM_PIN_PA4_ID = 4
+ControllerBox.FSYNC_STM_PIN_PA5_ID = 5
+ControllerBox.FSYNC_STM_PIN_PA6_ID = 6
+ControllerBox.FSYNC_STM_PIN_PA7_ID = 7
+ControllerBox.FSYNC_STM_PIN_PA8_ID = 8
+ControllerBox.FSYNC_STM_PIN_PA11_ID = 9
+ControllerBox.FSYNC_STM_PIN_PA12_ID = 10
+ControllerBox.FSYNC_STM_PIN_PA13_ID = 11
+ControllerBox.FSYNC_STM_PIN_PA14_ID = 12
+ControllerBox.FSYNC_STM_PIN_PA15_ID = 13
+ControllerBox.FSYNC_STM_PIN_PB0_ID = 14
+ControllerBox.FSYNC_STM_PIN_PB1_ID = 15
+ControllerBox.FSYNC_STM_PIN_PB3_ID = 16
+ControllerBox.FSYNC_STM_PIN_PB4_ID = 17
+ControllerBox.FSYNC_STM_PIN_PB5_ID = 18
+ControllerBox.FSYNC_STM_PIN_PB8_ID = 19
+ControllerBox.FSYNC_STM_PIN_PC6_ID = 20
+ControllerBox.FSYNC_STM_PIN_CONFIG_REG_END = 55
+
+ControllerBox.FSYNC_STM_PIN_CONFIG_VAILD_REG = ControllerBox._fsync_stm_bin(55, 1)
+
+ControllerBox.FSYNC_STM_PIN_PA0_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 0, 1)
+ControllerBox.FSYNC_STM_PIN_PA1_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 1, 1)
+ControllerBox.FSYNC_STM_PIN_PA2_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 2, 1)
+ControllerBox.FSYNC_STM_PIN_PA3_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 3, 1)
+ControllerBox.FSYNC_STM_PIN_PA4_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 4, 1)
+ControllerBox.FSYNC_STM_PIN_PA5_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 5, 1)
+ControllerBox.FSYNC_STM_PIN_PA6_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 6, 1)
+ControllerBox.FSYNC_STM_PIN_PA7_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 7, 1)
+ControllerBox.FSYNC_STM_PIN_PA8_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 8, 1)
+ControllerBox.FSYNC_STM_PIN_PA11_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 9, 1)
+ControllerBox.FSYNC_STM_PIN_PA12_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 10, 1)
+ControllerBox.FSYNC_STM_PIN_PA13_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 11, 1)
+ControllerBox.FSYNC_STM_PIN_PA14_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 12, 1)
+ControllerBox.FSYNC_STM_PIN_PA15_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 13, 1)
+ControllerBox.FSYNC_STM_PIN_PB0_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 14, 1)
+ControllerBox.FSYNC_STM_PIN_PB1_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 15, 1)
+ControllerBox.FSYNC_STM_PIN_PB3_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 16, 1)
+ControllerBox.FSYNC_STM_PIN_PB4_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 17, 1)
+ControllerBox.FSYNC_STM_PIN_PB5_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 18, 1)
+ControllerBox.FSYNC_STM_PIN_PB8_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 19, 1)
+ControllerBox.FSYNC_STM_PIN_PC6_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 20, 1)
+
+ControllerBox.CONFIG_REG_MAP = {
+    ControllerBox.FSYNC_STM_PIN_PA0_ID: ControllerBox.FSYNC_STM_PIN_PA0_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA1_ID: ControllerBox.FSYNC_STM_PIN_PA1_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA2_ID: ControllerBox.FSYNC_STM_PIN_PA2_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA3_ID: ControllerBox.FSYNC_STM_PIN_PA3_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA4_ID: ControllerBox.FSYNC_STM_PIN_PA4_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA5_ID: ControllerBox.FSYNC_STM_PIN_PA5_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA6_ID: ControllerBox.FSYNC_STM_PIN_PA6_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA7_ID: ControllerBox.FSYNC_STM_PIN_PA7_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA8_ID: ControllerBox.FSYNC_STM_PIN_PA8_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA11_ID: ControllerBox.FSYNC_STM_PIN_PA11_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA12_ID: ControllerBox.FSYNC_STM_PIN_PA12_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA13_ID: ControllerBox.FSYNC_STM_PIN_PA13_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA14_ID: ControllerBox.FSYNC_STM_PIN_PA14_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PA15_ID: ControllerBox.FSYNC_STM_PIN_PA15_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PB0_ID: ControllerBox.FSYNC_STM_PIN_PB0_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PB1_ID: ControllerBox.FSYNC_STM_PIN_PB1_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PB3_ID: ControllerBox.FSYNC_STM_PIN_PB3_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PB4_ID: ControllerBox.FSYNC_STM_PIN_PB4_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PB5_ID: ControllerBox.FSYNC_STM_PIN_PB5_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PB8_ID: ControllerBox.FSYNC_STM_PIN_PB8_CONFIG_REG,
+    ControllerBox.FSYNC_STM_PIN_PC6_ID: ControllerBox.FSYNC_STM_PIN_PC6_CONFIG_REG,
+}
+
+ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z = ControllerBox._fsync_stm_bin(1, 4)
+ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM = ControllerBox._fsync_stm_bin(2, 4)
+ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_ADC = ControllerBox._fsync_stm_bin(4, 4)
+ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM_KEEPAWAKE = ControllerBox._fsync_stm_bin(8, 4)
+ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM_1200PAD = ControllerBox._fsync_stm_bin(16, 4)
+
+ControllerBox.FSYNC_DEFAULT_CONFIG = {
+    ControllerBox.FSYNC_STM_PIN_PA0_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
+    ControllerBox.FSYNC_STM_PIN_PA1_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PA2_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
+    ControllerBox.FSYNC_STM_PIN_PA3_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PA4_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PA5_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PA6_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PA7_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PA8_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PA11_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PA12_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
+    ControllerBox.FSYNC_STM_PIN_PA13_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
+    ControllerBox.FSYNC_STM_PIN_PA14_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
+    ControllerBox.FSYNC_STM_PIN_PA15_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
+    ControllerBox.FSYNC_STM_PIN_PB0_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PB1_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PB3_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
+    ControllerBox.FSYNC_STM_PIN_PB4_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
+    ControllerBox.FSYNC_STM_PIN_PB5_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PB8_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+    ControllerBox.FSYNC_STM_PIN_PC6_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
+}
