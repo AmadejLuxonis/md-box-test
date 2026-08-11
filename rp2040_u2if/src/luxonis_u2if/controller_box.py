@@ -62,13 +62,25 @@ class ControllerBox:
     BUTTON_PINS = [19, 20, 21]
 
     # ----------------------------------------------------------------
-    # FSYNC CONTROLLER
+    # FSYNC CONTROLLER (legacy)
     # ----------------------------------------------------------------
+    FSYNC_SDA = 28
+    FSYNC_SCL = 29
 
-    FSYNC_I2C_BUS = 1
+    FSYNC_I2C_BUS = 0
     FSYNC_I2C_CLK_SPEED = 400000
     FSYNC_CONTROLLER_ADDR = 0x12
     FSYNC_CONTROLLER_DATA_ENDIAN = "<"
+
+    # ----------------------------------------------------------------
+    # FSYNC CONTROLLER
+    # ----------------------------------------------------------------
+   
+    fsync_bus = None
+    fsync_address = None
+    fsync_version = None
+
+    fw_ver = 0
 
     class FsyncMode(Enum):
         MASTER_INPUT = 0
@@ -77,7 +89,7 @@ class ControllerBox:
 
     class FsyncOutput(Enum):
         ISOLATED_STROBE = 0
-        M8_FSYNC = 1
+        M8_FSYNC = 1   
 
     def __init__(self):
         """
@@ -91,6 +103,25 @@ class ControllerBox:
         self._btn_thread = None
         self._running = False
 
+        reply = self.rp2040._hid_xfer(
+            bytes([self.rp2040.FSYNC_PROBE]),
+            True,
+        )[1]
+
+        if reply == self.rp2040.RESP_NOT_CONCERNED:
+            self.fw_ver = 0
+        else:
+            self.fw_ver = 1
+        
+        if self.fw_ver == 1:
+            fsync_probe_result = self.rp2040.fsync_probe()
+            self.fsync_bus = fsync_probe_result[0]
+            self.fsync_address = fsync_probe_result[1]
+            self.fsync_version = fsync_probe_result[2]
+
+            if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
+                raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
+
     def close(self):
         self._running = False
         if self._btn_thread:
@@ -98,7 +129,7 @@ class ControllerBox:
         self.rp2040.close()
 
     # ----------------------------------------------------------------
-    # FSYNC helpers
+    # FSYNC helpers (legacy)
     # ----------------------------------------------------------------
 
     @staticmethod
@@ -388,119 +419,215 @@ class ControllerBox:
     # ----------------------------------------------------------------
 
     def fsync_controller_init(self):
+        use_fw_api = (
+            self.fw_ver == 1
+            and self.rp2040._i2c_index != self.FSYNC_I2C_BUS
+        )
+
+        if use_fw_api:
+            self.rp2040.fsync_init()
+            self.rp2040.fsync_set_mode(self.rp2040.FSYNC_MODE_INPUT)
+
+            if self.rp2040.fsync_get_mode() != self.rp2040.FSYNC_MODE_INPUT:
+                raise RuntimeError("Failed to initialize FSYNC Controller")
+            return
 
         self.rp2040.i2c_set_port(self.FSYNC_I2C_BUS)
-        self.rp2040.i2c_configure(self.FSYNC_I2C_CLK_SPEED)
+        self.rp2040.i2c_configure(
+            self.FSYNC_I2C_CLK_SPEED, self.FSYNC_SDA, self.FSYNC_SCL
+        )
 
         slaves = self.rp2040.i2c_scan(
-            start=self.FSYNC_CONTROLLER_ADDR, end=self.FSYNC_CONTROLLER_ADDR + 1
+            start=self.FSYNC_CONTROLLER_ADDR,
+            end=self.FSYNC_CONTROLLER_ADDR + 1,
         )
 
         if self.FSYNC_CONTROLLER_ADDR not in slaves:
             raise RuntimeError("FSYNC Controller not found")
-        
-        
+
         self._fsync_stm_write(
-            self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
+            self.FSYNC_STM_CONFIG_REG
+            + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
         )
 
         mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
 
         if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
             self._fsync_stm_write(
-                self.FSYNC_STM_FW_VERSION_REG + self.FSYNC_STM_UNLOCK_MAGIC
+                self.FSYNC_STM_FW_VERSION_REG
+                + self.FSYNC_STM_UNLOCK_MAGIC
             )
 
-            for pid in range(0, self.FSYNC_STM_PIN_CONFIG_REG_END - self.FSYNC_STM_PIN_CONFIG_REG_START):
-                reg = self.CONFIG_REG_MAP[pid]
-                conf = self.FSYNC_DEFAULT_CONFIG[pid]
-                self._fsync_stm_write(reg + conf)
-
-            if self._fsync_stm_read(self.FSYNC_STM_PIN_CONFIG_VAILD_REG) != 0:
-                raise RuntimeError("Invalid hardware configuration passed to FSYNC Controller")
-
             self._fsync_stm_write(
-                self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
+                self.FSYNC_STM_CONFIG_REG
+                + self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
             )
 
             mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
 
-            if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
-                raise RuntimeError("Unable to unlock FSYNC Controller")
+        if mode != self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT:
+            raise RuntimeError("Unable to unlock FSYNC Controller")
 
         self._fsync_stm_write(
-            self.FSYNC_STM_CONFIG_REG + self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
+            self.FSYNC_STM_CONFIG_REG
+            + self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
         )
 
-    def fsync_controller_set_mode(self, mode: FsyncMode):
 
+    def fsync_controller_set_mode(self, mode: FsyncMode):
         if mode == self.FsyncMode.MASTER_INPUT:
-            mode_to_set = self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
+            fw_mode = self.rp2040.FSYNC_MODE_INPUT
+            legacy_mode = self.FSYNC_STM_CONFIG_REG_MASTER_INPUT
         elif mode == self.FsyncMode.MASTER_OUTPUT:
-            mode_to_set = self.FSYNC_STM_CONFIG_REG_MASTER_OUTPUT
+            fw_mode = self.rp2040.FSYNC_MODE_MASTER
+            legacy_mode = self.FSYNC_STM_CONFIG_REG_MASTER_OUTPUT
         elif mode == self.FsyncMode.SLAVE:
-            mode_to_set = self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
+            fw_mode = self.rp2040.FSYNC_MODE_SLAVE
+            legacy_mode = self.FSYNC_STM_CONFIG_REG_SLAVE_INPUT
         else:
             raise ValueError("Invalid FsyncMode")
 
-        self._fsync_stm_write(self.FSYNC_STM_CONFIG_REG + mode_to_set)
+        use_fw_api = (
+            self.fw_ver == 1
+            and self.rp2040._i2c_index != self.FSYNC_I2C_BUS
+        )
+
+        if use_fw_api:
+            self.rp2040.fsync_set_mode(fw_mode)
+
+            if self.rp2040.fsync_get_mode() != fw_mode:
+                raise RuntimeError("Failed to set FsyncMode")
+            return
+
+        self._fsync_stm_write(
+            self.FSYNC_STM_CONFIG_REG + legacy_mode
+        )
 
         read_mode = self._fsync_stm_read(self.FSYNC_STM_CONFIG_REG)
 
-        if read_mode != mode_to_set:
+        if read_mode != legacy_mode:
             raise RuntimeError("Failed to set FsyncMode")
 
+
     def fsync_controller_set_frequency(self, freq: float) -> float:
+        # Preserve the legacy public API validation (0..600 Hz).
+        freq_to_set = self._fsync_stm_internal_frequency(freq)
+
+        use_fw_api = (
+            self.fw_ver == 1
+            and self.rp2040._i2c_index != self.FSYNC_I2C_BUS
+        )
+
+        if use_fw_api:
+            self.rp2040.fsync_set_fps(freq)
+            _, actual_freq = self.rp2040.fsync_get_fps()
+            return actual_freq
 
         self._fsync_stm_write(
             self.FSYNC_STM_INTERNAL_FREQUENCY_REG
-            + self._fsync_stm_internal_frequency(freq)
+            + freq_to_set
         )
 
-        actual_frq = self._fsync_stm_read(self.FSYNC_STM_ACTUAL_FREQUENCY_REG)
+        actual_frq = self._fsync_stm_read(
+            self.FSYNC_STM_ACTUAL_FREQUENCY_REG
+        )
 
         return self._fsync_stm_to_float(actual_frq)
+
 
     def fsync_controller_set_duty_cycle(
         self, duty_cycle: float, output: FsyncOutput
     ) -> float:
-
         if output == self.FsyncOutput.ISOLATED_STROBE:
-            output_to_set = self.FSYNC_STM_OUTPUT_3_DUTY_CYCLE
+            fw_channel = self.rp2040.FSYNC_CHANNEL_PB0_ID
+            legacy_output = self.FSYNC_STM_OUTPUT_3_DUTY_CYCLE
         elif output == self.FsyncOutput.M8_FSYNC:
-            output_to_set = self.FSYNC_STM_OUTPUT_11_DUTY_CYCLE
+            fw_channel = self.rp2040.FSYNC_CHANNEL_PA11_ID
+            legacy_output = self.FSYNC_STM_OUTPUT_11_DUTY_CYCLE
         else:
             raise ValueError("Invalid FsyncOutput")
 
-        duty_cycle_to_set = self._fsync_stm_output_duty_cycle(duty_cycle)
+        duty_cycle_to_set = self._fsync_stm_output_duty_cycle(
+            duty_cycle
+        )
 
-        self._fsync_stm_write(output_to_set + duty_cycle_to_set)
+        use_fw_api = (
+            self.fw_ver == 1
+            and self.rp2040._i2c_index != self.FSYNC_I2C_BUS
+        )
 
-        actual = self._fsync_stm_to_int(self._fsync_stm_read(output_to_set))
+        if use_fw_api:
+            duty_to_set = self._fsync_stm_to_int(
+                duty_cycle_to_set
+            )
+
+            self.rp2040.fsync_set_duty(
+                fw_channel, duty_to_set
+            )
+
+            actual = self.rp2040.fsync_get_duty(fw_channel)
+
+            return 100.0 * actual / 2048.0
+
+        self._fsync_stm_write(
+            legacy_output + duty_cycle_to_set
+        )
+
+        actual = self._fsync_stm_to_int(
+            self._fsync_stm_read(legacy_output)
+        )
 
         return 100.0 * actual / 2048.0
 
-    def fsync_controller_set_polarity(self, polarity: bool, output: FsyncOutput):
 
+    def fsync_controller_set_polarity(
+        self, polarity: bool, output: FsyncOutput
+    ):
         if output == self.FsyncOutput.ISOLATED_STROBE:
-            output_to_set = self.FSYNC_STM_OUTPUT_3_ACTIVE_LVL
+            fw_channel = self.rp2040.FSYNC_CHANNEL_PB0_ID
+            legacy_output = self.FSYNC_STM_OUTPUT_3_ACTIVE_LVL
         elif output == self.FsyncOutput.M8_FSYNC:
-            output_to_set = self.FSYNC_STM_OUTPUT_11_ACTIVE_LVL
+            fw_channel = self.rp2040.FSYNC_CHANNEL_PA11_ID
+            legacy_output = self.FSYNC_STM_OUTPUT_11_ACTIVE_LVL
         else:
             raise ValueError("Invalid FsyncOutput")
 
-        polarity_to_set = (
-            self.FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH
-            if polarity
-            else self.FSYNC_STM_OUTPUT_ACTIVE_LVL_LOW
+        use_fw_api = (
+            self.fw_ver == 1
+            and self.rp2040._i2c_index != self.FSYNC_I2C_BUS
         )
 
-        self._fsync_stm_write(output_to_set + polarity_to_set)
+        if use_fw_api:
+            self.rp2040.fsync_set_polarity(
+                fw_channel, int(polarity)
+            )
+            return
+
+        # Generate both values here because the current file only defines
+        # FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH.
+        polarity_to_set = self._fsync_stm_bin(
+            1 if polarity else 0, 4
+        )
+
+        self._fsync_stm_write(
+            legacy_output + polarity_to_set
+        )
+
 
     def fsync_controller_input_detected(self) -> bool:
+        use_fw_api = (
+            self.fw_ver == 1
+            and self.rp2040._i2c_index != self.FSYNC_I2C_BUS
+        )
+
+        if use_fw_api:
+            present, _, _ = self.rp2040.fsync_get_input_info()
+            return present
 
         present = self._fsync_stm_to_int(
-            self._fsync_stm_read(self.FSYNC_STM_IN_PRESENT_REG)
+            self._fsync_stm_read(
+                self.FSYNC_STM_IN_PRESENT_REG
+            )
         )
 
         if present == 0:
@@ -508,18 +635,43 @@ class ControllerBox:
         elif present == 1:
             return True
         else:
-            raise RuntimeError(f"Unexpected input present value: {present}")
+            raise RuntimeError(
+                f"Unexpected input present value: {present}"
+            )
+
 
     def fsync_controller_input_frequency(self) -> float:
-        return self._fsync_stm_to_float(
-            self._fsync_stm_read(self.FSYNC_STM_IN_FREQ_REG)
+        use_fw_api = (
+            self.fw_ver == 1
+            and self.rp2040._i2c_index != self.FSYNC_I2C_BUS
         )
+
+        if use_fw_api:
+            _, freq, _ = self.rp2040.fsync_get_input_info()
+            return freq
+
+        return self._fsync_stm_to_float(
+            self._fsync_stm_read(
+                self.FSYNC_STM_IN_FREQ_REG
+            )
+        )
+
 
     def fsync_controller_input_duty_cycle(self) -> float:
-        return self._fsync_stm_to_float(
-            self._fsync_stm_read(self.FSYNC_STM_IN_DUTY_REG)
+        use_fw_api = (
+            self.fw_ver == 1
+            and self.rp2040._i2c_index != self.FSYNC_I2C_BUS
         )
 
+        if use_fw_api:
+            _, _, duty = self.rp2040.fsync_get_input_info()
+            return 100.0 * duty / 2048.0
+
+        return self._fsync_stm_to_float(
+            self._fsync_stm_read(
+                self.FSYNC_STM_IN_DUTY_REG
+            )
+        )
 
 # ----------------------------------------------------------------
 # FSYNC register map
@@ -541,107 +693,4 @@ ControllerBox.FSYNC_STM_OUTPUT_3_DUTY_CYCLE = ControllerBox._fsync_stm_bin(0x0E,
 ControllerBox.FSYNC_STM_OUTPUT_3_ACTIVE_LVL = ControllerBox._fsync_stm_bin(0x0F, 1)
 ControllerBox.FSYNC_STM_OUTPUT_11_DUTY_CYCLE = ControllerBox._fsync_stm_bin(0x1E, 1)
 ControllerBox.FSYNC_STM_OUTPUT_11_ACTIVE_LVL = ControllerBox._fsync_stm_bin(0x1F, 1)
-ControllerBox.FSYNC_STM_OUTPUT_ACTIVE_LVL_LOW = ControllerBox._fsync_stm_bin(0x00, 4)
 ControllerBox.FSYNC_STM_OUTPUT_ACTIVE_LVL_HIGH = ControllerBox._fsync_stm_bin(0x01, 4)
-
-ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START = 34
-ControllerBox.FSYNC_STM_PIN_PA0_ID = 0
-ControllerBox.FSYNC_STM_PIN_PA1_ID = 1
-ControllerBox.FSYNC_STM_PIN_PA2_ID = 2
-ControllerBox.FSYNC_STM_PIN_PA3_ID = 3
-ControllerBox.FSYNC_STM_PIN_PA4_ID = 4
-ControllerBox.FSYNC_STM_PIN_PA5_ID = 5
-ControllerBox.FSYNC_STM_PIN_PA6_ID = 6
-ControllerBox.FSYNC_STM_PIN_PA7_ID = 7
-ControllerBox.FSYNC_STM_PIN_PA8_ID = 8
-ControllerBox.FSYNC_STM_PIN_PA11_ID = 9
-ControllerBox.FSYNC_STM_PIN_PA12_ID = 10
-ControllerBox.FSYNC_STM_PIN_PA13_ID = 11
-ControllerBox.FSYNC_STM_PIN_PA14_ID = 12
-ControllerBox.FSYNC_STM_PIN_PA15_ID = 13
-ControllerBox.FSYNC_STM_PIN_PB0_ID = 14
-ControllerBox.FSYNC_STM_PIN_PB1_ID = 15
-ControllerBox.FSYNC_STM_PIN_PB3_ID = 16
-ControllerBox.FSYNC_STM_PIN_PB4_ID = 17
-ControllerBox.FSYNC_STM_PIN_PB5_ID = 18
-ControllerBox.FSYNC_STM_PIN_PB8_ID = 19
-ControllerBox.FSYNC_STM_PIN_PC6_ID = 20
-ControllerBox.FSYNC_STM_PIN_CONFIG_REG_END = 55
-
-ControllerBox.FSYNC_STM_PIN_CONFIG_VAILD_REG = ControllerBox._fsync_stm_bin(55, 1)
-
-ControllerBox.FSYNC_STM_PIN_PA0_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 0, 1)
-ControllerBox.FSYNC_STM_PIN_PA1_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 1, 1)
-ControllerBox.FSYNC_STM_PIN_PA2_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 2, 1)
-ControllerBox.FSYNC_STM_PIN_PA3_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 3, 1)
-ControllerBox.FSYNC_STM_PIN_PA4_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 4, 1)
-ControllerBox.FSYNC_STM_PIN_PA5_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 5, 1)
-ControllerBox.FSYNC_STM_PIN_PA6_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 6, 1)
-ControllerBox.FSYNC_STM_PIN_PA7_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 7, 1)
-ControllerBox.FSYNC_STM_PIN_PA8_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 8, 1)
-ControllerBox.FSYNC_STM_PIN_PA11_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 9, 1)
-ControllerBox.FSYNC_STM_PIN_PA12_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 10, 1)
-ControllerBox.FSYNC_STM_PIN_PA13_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 11, 1)
-ControllerBox.FSYNC_STM_PIN_PA14_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 12, 1)
-ControllerBox.FSYNC_STM_PIN_PA15_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 13, 1)
-ControllerBox.FSYNC_STM_PIN_PB0_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 14, 1)
-ControllerBox.FSYNC_STM_PIN_PB1_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 15, 1)
-ControllerBox.FSYNC_STM_PIN_PB3_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 16, 1)
-ControllerBox.FSYNC_STM_PIN_PB4_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 17, 1)
-ControllerBox.FSYNC_STM_PIN_PB5_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 18, 1)
-ControllerBox.FSYNC_STM_PIN_PB8_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 19, 1)
-ControllerBox.FSYNC_STM_PIN_PC6_CONFIG_REG = ControllerBox._fsync_stm_bin(ControllerBox.FSYNC_STM_PIN_CONFIG_REG_START + 20, 1)
-
-ControllerBox.CONFIG_REG_MAP = {
-    ControllerBox.FSYNC_STM_PIN_PA0_ID: ControllerBox.FSYNC_STM_PIN_PA0_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA1_ID: ControllerBox.FSYNC_STM_PIN_PA1_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA2_ID: ControllerBox.FSYNC_STM_PIN_PA2_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA3_ID: ControllerBox.FSYNC_STM_PIN_PA3_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA4_ID: ControllerBox.FSYNC_STM_PIN_PA4_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA5_ID: ControllerBox.FSYNC_STM_PIN_PA5_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA6_ID: ControllerBox.FSYNC_STM_PIN_PA6_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA7_ID: ControllerBox.FSYNC_STM_PIN_PA7_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA8_ID: ControllerBox.FSYNC_STM_PIN_PA8_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA11_ID: ControllerBox.FSYNC_STM_PIN_PA11_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA12_ID: ControllerBox.FSYNC_STM_PIN_PA12_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA13_ID: ControllerBox.FSYNC_STM_PIN_PA13_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA14_ID: ControllerBox.FSYNC_STM_PIN_PA14_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PA15_ID: ControllerBox.FSYNC_STM_PIN_PA15_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PB0_ID: ControllerBox.FSYNC_STM_PIN_PB0_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PB1_ID: ControllerBox.FSYNC_STM_PIN_PB1_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PB3_ID: ControllerBox.FSYNC_STM_PIN_PB3_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PB4_ID: ControllerBox.FSYNC_STM_PIN_PB4_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PB5_ID: ControllerBox.FSYNC_STM_PIN_PB5_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PB8_ID: ControllerBox.FSYNC_STM_PIN_PB8_CONFIG_REG,
-    ControllerBox.FSYNC_STM_PIN_PC6_ID: ControllerBox.FSYNC_STM_PIN_PC6_CONFIG_REG,
-}
-
-ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z = ControllerBox._fsync_stm_bin(1, 4)
-ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM = ControllerBox._fsync_stm_bin(2, 4)
-ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_ADC = ControllerBox._fsync_stm_bin(4, 4)
-ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM_KEEPAWAKE = ControllerBox._fsync_stm_bin(8, 4)
-ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM_1200PAD = ControllerBox._fsync_stm_bin(16, 4)
-
-ControllerBox.FSYNC_DEFAULT_CONFIG = {
-    ControllerBox.FSYNC_STM_PIN_PA0_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
-    ControllerBox.FSYNC_STM_PIN_PA1_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PA2_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
-    ControllerBox.FSYNC_STM_PIN_PA3_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PA4_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PA5_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PA6_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PA7_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PA8_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PA11_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PA12_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
-    ControllerBox.FSYNC_STM_PIN_PA13_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
-    ControllerBox.FSYNC_STM_PIN_PA14_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
-    ControllerBox.FSYNC_STM_PIN_PA15_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
-    ControllerBox.FSYNC_STM_PIN_PB0_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PB1_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PB3_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
-    ControllerBox.FSYNC_STM_PIN_PB4_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_HIGH_Z,
-    ControllerBox.FSYNC_STM_PIN_PB5_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PB8_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-    ControllerBox.FSYNC_STM_PIN_PC6_ID: ControllerBox.FSYNC_STM_PIN_CONFIG_TYPE_PWM,
-}
