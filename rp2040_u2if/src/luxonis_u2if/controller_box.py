@@ -133,10 +133,7 @@ class ControllerBox:
             self.fsync_bus = fsync_probe_result[0]
             self.fsync_address = fsync_probe_result[1]
             self.fsync_version = fsync_probe_result[2]
-
-            if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
-                raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
-
+            
     def close(self):
         self._running = False
         if self._btn_thread:
@@ -526,6 +523,9 @@ class ControllerBox:
     # FSYNC
     # ----------------------------------------------------------------
     def fsync_controller_get_pin_configuration(self, output: FsyncOutput) -> int:
+        if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
+            raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
+
         if output == self.FsyncOutput.ISOLATED_STROBE:
             fw_pin = self.rp2040.FSYNC_PIN_PB0_ID
         elif output == self.FsyncOutput.M8_FSYNC:
@@ -543,6 +543,9 @@ class ControllerBox:
     def fsync_controller_set_pin_configuration(
         self, cfg: int, output: FsyncOutput
     ) -> int:
+        if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
+            raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
+
         if self.fsync_initialised:
             raise RuntimeError("FSYNC Controller already initialised, the configuration must be set before the fsync initialisation.")
     
@@ -576,6 +579,9 @@ class ControllerBox:
         )
 
     def fsync_controller_init(self):
+        if self.fsync_address == self.rp2040.FSYNC_BOOT_ADDRESS:
+            raise RuntimeError("FSYNC controller is in bootloader mode. Did you flash the FSYNC controller?")
+
         use_fw_api = (
             self.fw_ver == 1
         )
@@ -708,9 +714,11 @@ class ControllerBox:
             raise RuntimeError("FSYNC Controller not initialised.")
 
         if output == self.FsyncOutput.ISOLATED_STROBE:
+            fw_pin = self.rp2040.FSYNC_PIN_PB0_ID
             fw_channel = self.rp2040.FSYNC_CHANNEL_PB0_ID
             legacy_output = self.FSYNC_STM_OUTPUT_3_DUTY_CYCLE
         elif output == self.FsyncOutput.M8_FSYNC:
+            fw_pin = self.rp2040.FSYNC_PIN_PA11_ID
             fw_channel = self.rp2040.FSYNC_CHANNEL_PA11_ID
             legacy_output = self.FSYNC_STM_OUTPUT_11_DUTY_CYCLE
         else:
@@ -732,6 +740,25 @@ class ControllerBox:
             self.rp2040.fsync_set_duty(
                 fw_channel, duty_to_set
             )
+
+            cap = self.rp2040.fsync_get_pin_capabilities(fw_pin)
+
+            if cap & self.PIN_CONFIG_TYPE_PWM_HFSTROBE:
+                _, fps = self.rp2040.fsync_get_fps()
+                polarity = self.rp2040.fsync_get_polarity(fw_channel)
+
+                act_duty = duty_cycle / 100.0
+
+                if polarity == 1:
+                    act_duty = 1 - duty_cycle
+
+                if act_duty + act_duty / fps * (1300 - fps) > 1:
+                    max_duty = (1 / (1 + 1 / fps * (1300 - fps))) * 100
+                    if polarity == 0:
+                        raise ValueError(f"Input duty too high for high fps strobe for this frequency and negative polarity. Max is {max_duty} %")
+                    else:
+                        max_duty = 100 - max_duty
+                        raise ValueError(f"Input duty too high for high fps strobe for this frequency and positive polarity. Min is {max_duty} %")
 
             actual = self.rp2040.fsync_get_duty(fw_channel)
 

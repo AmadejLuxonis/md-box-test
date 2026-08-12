@@ -103,34 +103,12 @@ box.relay_reset(2)
 box.relay_reset(3)
 box.relay_reset(4)
 
-#box.fsync_controller_init()
-
-print(box.rp2040.fsync_probe())
-print(box.rp2040.fsync_probe())
-print(box.rp2040.fsync_probe())
-print(box.rp2040.fsync_probe())
-print(box.rp2040.fsync_probe())
-print(box.rp2040.fsync_probe())
-
-"""
-resp = box.rp2040._hid_xfer(
-    bytes([box.rp2040.FSYNC_GETPINCAPABILITIES, 5]),
-    True,
-)
-print(resp)
-"""
-
-box.fsync_controller_set_pin_configuration(box.PIN_CONFIG_TYPE_PWM, box.FsyncOutput.ISOLATED_STROBE)
+box.fsync_controller_set_pin_configuration(box.PIN_CONFIG_TYPE_PWM_HFSTROBE, box.FsyncOutput.ISOLATED_STROBE)
 box.fsync_controller_init()
 box.fsync_controller_set_frequency(30)
-box.fsync_controller_set_duty_cycle(50, box.FsyncOutput.ISOLATED_STROBE)
+box.fsync_controller_set_duty_cycle(2, box.FsyncOutput.ISOLATED_STROBE)
 box.fsync_controller_set_polarity(0, box.FsyncOutput.ISOLATED_STROBE)
 box.fsync_controller_set_mode(box.FsyncMode.MASTER_OUTPUT)
-
-box.i2c_init(100000, 1, 2)
-
-while True:
-    time.sleep(1)
 
 while True:
     now = time.monotonic()
