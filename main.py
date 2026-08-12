@@ -120,26 +120,16 @@ resp = box.rp2040._hid_xfer(
 print(resp)
 """
 
-print(box.rp2040.fsync_get_pin_capabilities(14))
-
-box.rp2040.fsync_set_pin_capabilities(14, 16)
-
-"""
-print(box.rp2040.fsync_get_pin_capabilities(14))
-print(box.rp2040.fsync_init())
-print(box.rp2040.fsync_set_fps(30))
-print(box.rp2040.fsync_set_duty(3, 2040))
-print(box.rp2040.fsync_set_polarity(3, 1))
-print(box.rp2040.fsync_set_mode(1))
-"""
-
+box.fsync_controller_set_pin_configuration(box.PIN_CONFIG_TYPE_PWM, box.FsyncOutput.ISOLATED_STROBE)
 box.fsync_controller_init()
+box.fsync_controller_set_frequency(30)
+box.fsync_controller_set_duty_cycle(50, box.FsyncOutput.ISOLATED_STROBE)
+box.fsync_controller_set_polarity(0, box.FsyncOutput.ISOLATED_STROBE)
+box.fsync_controller_set_mode(box.FsyncMode.MASTER_OUTPUT)
 
-#box.rp2040.i2c_set_port(0)
-#box.rp2040.i2c_configure(100000, 0, 1, True)
+box.i2c_init(100000, 1, 2)
 
 while True:
-    #box.rp2040._i2c_write(0x20, bytes([0x20, 2, 3, 4]), 0, None, True)
     time.sleep(1)
 
 while True:
