@@ -105,9 +105,14 @@ box.relay_reset(4)
 
 box.fsync_controller_set_pin_configuration(box.PIN_CONFIG_TYPE_PWM_HFSTROBE, box.FsyncOutput.ISOLATED_STROBE)
 box.fsync_controller_init()
-box.fsync_controller_set_frequency(30)
+box.fsync_controller_set_frequency(40)
+
 box.fsync_controller_set_duty_cycle(2, box.FsyncOutput.ISOLATED_STROBE)
 box.fsync_controller_set_polarity(0, box.FsyncOutput.ISOLATED_STROBE)
+
+box.fsync_controller_set_duty_cycle(50, box.FsyncOutput.M8_FSYNC)
+box.fsync_controller_set_polarity(0, box.FsyncOutput.M8_FSYNC)
+
 box.fsync_controller_set_mode(box.FsyncMode.MASTER_OUTPUT)
 
 while True:
