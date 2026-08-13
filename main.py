@@ -2,8 +2,6 @@ import time
 import os
 from luxonis_u2if import ControllerBox
 
-IS_TRANSMITTER = True
-
 # ------------------------------------------------------------
 # Connect to the ControllerBox
 # ------------------------------------------------------------
