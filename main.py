@@ -101,7 +101,7 @@ box.relay_reset(2)
 box.relay_reset(3)
 box.relay_reset(4)
 
-stm_fps = 15
+stm_fps = 5
 stm_polarity = 0
 
 box.fsync_controller_set_pin_configuration(box.PIN_CONFIG_TYPE_PWM, box.FsyncOutput.ISOLATED_STROBE)
