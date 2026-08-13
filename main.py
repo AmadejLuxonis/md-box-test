@@ -101,14 +101,14 @@ box.relay_reset(2)
 box.relay_reset(3)
 box.relay_reset(4)
 
-stm_fps = 40
+stm_fps = 15
 stm_polarity = 0
 
-box.fsync_controller_set_pin_configuration(box.PIN_CONFIG_TYPE_PWM_HFSTROBE, box.FsyncOutput.ISOLATED_STROBE)
+box.fsync_controller_set_pin_configuration(box.PIN_CONFIG_TYPE_PWM, box.FsyncOutput.ISOLATED_STROBE)
 box.fsync_controller_init()
 box.fsync_controller_set_frequency(stm_fps)
 
-box.fsync_controller_set_duty_cycle(box.fsync_controller_maxmin_hfstrobe_duty(stm_fps, stm_polarity) * 0.5, box.FsyncOutput.ISOLATED_STROBE)
+box.fsync_controller_set_duty_cycle(50, box.FsyncOutput.ISOLATED_STROBE)
 box.fsync_controller_set_polarity(stm_polarity, box.FsyncOutput.ISOLATED_STROBE)
 
 box.fsync_controller_set_duty_cycle(50, box.FsyncOutput.M8_FSYNC)
