@@ -1,197 +1,187 @@
-import time
+"""Pytest hardware checks for the Luxonis M8 Controller Box.
+
+Run on the OAK4 host with::
+
+    pytest -v main.py
+
+The GPIO test expects every logical ControllerBox GPIO (1..16) to be high.
+Output GPIOs are driven high by the fixture and input GPIOs use their internal
+pull-up, so the assertion is made through the same read path used by an
+application.
+"""
+
+import math
 import os
+import shutil
+import struct
+import subprocess
+import tempfile
+import wave
+import time
+from pathlib import Path
+
+import pytest
+
 from luxonis_u2if import ControllerBox
 
-# ------------------------------------------------------------
-# Connect to the ControllerBox
-# ------------------------------------------------------------
-box = ControllerBox()
-box.led_init()  # Initialize all LEDs
-box.relay_init()
+USB_DEVICE_ID = "0403:6001"
 
-# ------------------------------------------------------------
-# Button setup (IRQ)
-# ------------------------------------------------------------
-BUTTON1_PIN = 20  # GPIO pin where the button is connected
-BUTTON2_PIN = 21
-BUTTON3_PIN = 19 
+GPIOS = tuple(range(1, 17))
+#OUT_GPIOS = (1, 4, 6, 8, 10, 12, 14)
+OUT_GPIOS = (1, 4, 6, 8, 10, 16)
+IN_GPIOS = tuple(gpio for gpio in GPIOS if gpio not in OUT_GPIOS)
+RELAY_GPIOS = (12, 13, 14, 15)
 
-box.gpio_init(BUTTON1_PIN, box.GPIO_IN, box.GPIO_PULL_UP)
-box.gpio_init(BUTTON2_PIN, box.GPIO_IN, box.GPIO_PULL_UP)
-box.gpio_init(BUTTON3_PIN, box.GPIO_IN, box.GPIO_PULL_UP)
+FSYNC_FREQUENCY_HZ = 5
+FSYNC_DUTY_CYCLE = 50.0
+FSYNC_POLARITY = False  # Active-low, matching the original example.
 
-# Enable interrupts for rising and falling edges with debounce
-box.gpio_set_irq(
-    BUTTON1_PIN,
-    box.IRQ_RISING | box.IRQ_FALLING,
-    debounce=True
-)
+AUDIO_CARD = os.environ.get("M8_AUDIO_CARD", "1")
+AUDIO_DEVICE = os.environ.get("M8_AUDIO_DEVICE", "0")
+TONE_FILE = Path(tempfile.gettempdir()) / "m8_controller_box_beep.wav"
 
-box.gpio_set_irq(
-    BUTTON2_PIN,
-    box.IRQ_RISING | box.IRQ_FALLING,
-    debounce=True
-)
+@pytest.fixture(scope="module")
+def box():
+    """Open the ControllerBox and leave all test GPIOs in the high state."""
 
-box.gpio_set_irq(
-    BUTTON3_PIN,
-    box.IRQ_RISING | box.IRQ_FALLING,
-    debounce=True
-)
-
-box.serial_init()
-
-# ------------------------------------------------------------
-# Audio setup
-# ------------------------------------------------------------
-CARD = 1          # USB audio card number (from /proc/asound/cards)
-DEVICE = 0        # Audio device on that card
-FREQ = 1000       # Beep frequency in Hz
-DURATION = 0.1    # Tone chunk duration in seconds
-TONE_FILE = "/tmp/beep.wav"  # Temporary WAV file to use with aplay
-
-def generate_wav():
-    """Generate a short 1kHz sine wave WAV file if it doesn't exist."""
-    import wave, struct, math
-    framerate = 44100
-    amplitude = 32767
-    n_samples = int(framerate * DURATION)
-
-    with wave.open(TONE_FILE, 'w') as wf:
-        wf.setnchannels(1)        # Mono
-        wf.setsampwidth(2)        # 16-bit
-        wf.setframerate(framerate)
-        for i in range(n_samples):
-            value = int(amplitude * math.sin(2 * math.pi * FREQ * i / framerate))
-            wf.writeframesraw(struct.pack('<h', value))
-
-def play_tone():
-    """Play the generated tone using aplay."""
-    if not os.path.exists(TONE_FILE):
-        generate_wav()
-    os.system(f"aplay -D hw:{CARD},{DEVICE} {TONE_FILE} >/dev/null 2>&1")
-
-# ------------------------------------------------------------
-# Main loop
-# ------------------------------------------------------------
-blink_interval = 0.5        # Time for LED 1 blink
-relay_interval = 1
-last_blink = time.monotonic()
-last_switch = time.monotonic()
-led_on = False
-button_pressed = False      # Track if button is currently pressed
-led2_state = False
-led3_state = False
-
-relay_state = False
-
-GPIOS = list(range(1, 16 + 1))
-OUT_GPIOS = [1, 4, 6, 8, 10, 12, 14]
-IN_GPIOS = [gpio for gpio in GPIOS if gpio not in OUT_GPIOS]
-
-for gpio in OUT_GPIOS:
-    box.gpio_init(gpio, box.GPIO_OUT, box.GPIO_PULL_NONE) 
-    box.gpio_set(gpio, True)
-
-for gpio in IN_GPIOS:
-    box.gpio_init(gpio, box.GPIO_IN, box.GPIO_PULL_DOWN)
-
-box.relay_reset(1)
-box.relay_reset(2)
-box.relay_reset(3)
-box.relay_reset(4)
-
-stm_fps = 5
-stm_polarity = 0
-
-box.fsync_controller_set_pin_configuration(box.PIN_CONFIG_TYPE_PWM, box.FsyncOutput.ISOLATED_STROBE)
-box.fsync_controller_init()
-box.fsync_controller_set_frequency(stm_fps)
-
-box.fsync_controller_set_duty_cycle(50, box.FsyncOutput.ISOLATED_STROBE)
-box.fsync_controller_set_polarity(stm_polarity, box.FsyncOutput.ISOLATED_STROBE)
-
-box.fsync_controller_set_duty_cycle(50, box.FsyncOutput.M8_FSYNC)
-box.fsync_controller_set_polarity(stm_polarity, box.FsyncOutput.M8_FSYNC)
-
-box.fsync_controller_set_mode(box.FsyncMode.MASTER_OUTPUT)
-
-while True:
-    now = time.monotonic()
-
-    # ----------------------------
-    # LED 1 blinking logic
-    # ----------------------------
-    if now - last_blink >= blink_interval:
-        led_on = not led_on
-        if led_on:
-            box.led_on(1)
-        else:
-            box.led_off(1)
-        last_blink = now
-
-    if now - last_switch >= relay_interval:
-        box.serial_write("Pozdravljen svet!")
-        print(f"UART: {box.serial_read()}")
+    controller = ControllerBox()
+    try:
+        for gpio in OUT_GPIOS:
+            controller.gpio_init(
+                gpio, controller.GPIO_OUT, controller.GPIO_PULL_NONE
+            )
+            controller.gpio_set(gpio, True)
 
         for gpio in IN_GPIOS:
-            print(f"GPIO {gpio}: {box.gpio_get(gpio)}")
+            controller.gpio_init(
+                gpio, controller.GPIO_IN, controller.GPIO_PULL_DOWN
+            )
 
-        print("--------------------------------")
+        yield controller
+    finally:
+        # Leave externally connected outputs in a safe state before closing.
+        for gpio in OUT_GPIOS:
+            try:
+                controller.gpio_set(gpio, False)
+            except Exception:
+                pass
+        controller.close()
 
-        relay_state = not relay_state
 
-        if relay_state == True:
-            box.relay_set(1) 
-            time.sleep(0.1)
-            box.relay_set(2)
-            time.sleep(0.1)
-            box.relay_set(3)
-            time.sleep(0.1)
-            box.relay_set(4)
-            time.sleep(0.1)
-        else:
-            box.relay_reset(1)
-            time.sleep(0.1)
-            box.relay_reset(2)
-            time.sleep(0.1)
-            box.relay_reset(3)
-            time.sleep(0.1)
-            box.relay_reset(4)
-            time.sleep(0.1)
+def _write_tone_file(path: Path) -> None:
+    """Create a short tone used to turn on the onboard buzzer."""
 
-        last_switch = now
+    sample_rate = 44_100
+    duration = 0.1
+    frequency = 1_000
+    amplitude = 32_767
+    sample_count = int(sample_rate * duration)
 
-    # ----------------------------
-    # Handle button IRQ events
-    # ----------------------------
-    for pin, event in box.gpio_get_irq():
-        if pin == BUTTON1_PIN:
-            if event == box.IRQ_RISING:
-                # Button pressed
-                button_pressed = True
-            elif event == box.IRQ_FALLING:
-                # Button released
-                button_pressed = False
-        elif pin == BUTTON2_PIN and event == box.IRQ_RISING:
-            led2_state = not led2_state
+    with wave.open(str(path), "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        for sample in range(sample_count):
+            value = int(
+                amplitude
+                * math.sin(2 * math.pi * frequency * sample / sample_rate)
+            )
+            wav_file.writeframes(struct.pack("<h", value))
 
-            if led2_state:
-                box.led_on(2)
-            else:
-                box.led_off(2)
-        elif pin == BUTTON3_PIN and event == box.IRQ_RISING:
-            led3_state = not led3_state
 
-            if led3_state:
-                box.led_on(3)
-            else:
-                box.led_off(3)
+def _turn_buzzer_on() -> None:
+    """Play one tone through the M8 audio device; there is no loop/button logic."""
 
-    # ----------------------------
-    # Continuous beep while button held
-    # ----------------------------
-    if button_pressed:
-        play_tone()  # Play short tone repeatedly
-    
-    time.sleep(0.01)  # Small delay for loop efficiency
+    aplay = shutil.which("aplay")
+    if aplay is None:
+        pytest.skip("aplay is not installed on this host")
+
+    _write_tone_file(TONE_FILE)
+    subprocess.run(
+        [aplay, "-D", f"hw:{AUDIO_CARD},{AUDIO_DEVICE}", str(TONE_FILE)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def test_all_gpios_read_logical_one(box):
+    """Every logical GPIO 1..16 must read back as a logical 1."""
+
+    time.sleep(0.1)
+
+    for gpio in IN_GPIOS:
+        if gpio not in RELAY_GPIOS:
+            assert box.gpio_get(gpio) == 1, f"GPIO {gpio} did not read logical 1"
+
+
+def test_buzzer_is_turned_on():
+    """Turn the onboard buzzer on once for the duration of the check."""
+
+    _turn_buzzer_on()
+
+
+def test_fsync_controller_setup(box):
+    """Configure both FSYNC outputs; ControllerBox raises on setup failure."""
+
+    box.fsync_controller_init()
+    box.fsync_controller_set_frequency(FSYNC_FREQUENCY_HZ)
+
+    for output in (
+        box.FsyncOutput.ISOLATED_STROBE,
+        box.FsyncOutput.M8_FSYNC,
+    ):
+        box.fsync_controller_set_duty_cycle(FSYNC_DUTY_CYCLE, output)
+        box.fsync_controller_set_polarity(FSYNC_POLARITY, output)
+
+    box.fsync_controller_set_mode(box.FsyncMode.MASTER_OUTPUT)
+
+def test_uart(box):
+    box.serial_init()
+
+    box.serial_write("Pozdravljen svet!")
+    assert box.serial_read() == b"Pozdravljen svet!"
+
+def test_relays(box):
+    box.relay_init()
+
+    box.relay_set(1)
+    box.relay_set(2)
+    box.relay_set(3)
+    box.relay_set(4)
+
+    time.sleep(0.5)
+
+    for gpio in RELAY_GPIOS:
+        assert box.gpio_get(gpio) == 0, f"GPIO {gpio} did not read logical 0"
+
+    box.relay_reset(1)
+    box.relay_reset(2)
+    box.relay_reset(3)
+    box.relay_reset(4)
+
+    time.sleep(0.5)
+
+    for gpio in RELAY_GPIOS:
+        assert box.gpio_get(gpio) == 1, f"GPIO {gpio} did not read logical 1"
+
+def test_usb_device_is_present():
+    """Verify that the configured USB device is visible through the M8 hub."""
+
+    lsusb = shutil.which("lsusb")
+    if lsusb is None:
+        pytest.fail("lsusb is not installed in the OakApp container")
+
+    result = subprocess.run(
+        [lsusb, "-d", USB_DEVICE_ID.lower()],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.strip(), (
+        f"USB device {USB_DEVICE_ID} was not found through the M8 hub"
+    )
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__, "-v"]))
