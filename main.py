@@ -150,7 +150,7 @@ def test_relays(box):
     box.relay_set(3)
     box.relay_set(4)
 
-    time.sleep(0.5)
+    time.sleep(0.2)
 
     for gpio in RELAY_GPIOS:
         assert box.gpio_get(gpio) == 0, f"GPIO {gpio} did not read logical 0"
@@ -160,7 +160,7 @@ def test_relays(box):
     box.relay_reset(3)
     box.relay_reset(4)
 
-    time.sleep(0.5)
+    time.sleep(0.2)
 
     for gpio in RELAY_GPIOS:
         assert box.gpio_get(gpio) == 1, f"GPIO {gpio} did not read logical 1"
