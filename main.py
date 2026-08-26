@@ -1,15 +1,3 @@
-"""Pytest hardware checks for the Luxonis M8 Controller Box.
-
-Run on the OAK4 host with::
-
-    pytest -v main.py
-
-The GPIO test expects every logical ControllerBox GPIO (1..16) to be high.
-Output GPIOs are driven high by the fixture and input GPIOs use their internal
-pull-up, so the assertion is made through the same read path used by an
-application.
-"""
-
 import math
 import os
 import shutil
@@ -34,7 +22,7 @@ RELAY_GPIOS = (12, 13, 14, 15)
 
 FSYNC_FREQUENCY_HZ = 5
 FSYNC_DUTY_CYCLE = 50.0
-FSYNC_POLARITY = False  # Active-low, matching the original example.
+FSYNC_POLARITY = False
 
 AUDIO_CARD = os.environ.get("M8_AUDIO_CARD", "1")
 AUDIO_DEVICE = os.environ.get("M8_AUDIO_DEVICE", "0")
